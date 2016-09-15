@@ -1,10 +1,10 @@
-
 import os
 import sys
 
 import dropbox
 from dropbox.exceptions import AuthError
-import datetime
+
+from latex import run_latexdiff
 
 
 def dropbox_authorize():
@@ -77,11 +77,7 @@ def main(argv):
     # Download old version
     md2, res2 = dbx.files_download(filename, list_all[first_ver - 1].rev)
 
-    print "Current version:"
-    print res1.content
-    print "\n"
-    print "Old version:"
-    print res2.content
+    run_latexdiff(res1, res2)
 
     pass
 
