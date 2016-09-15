@@ -1,8 +1,10 @@
+
 import os
 import sys
 
 import dropbox
 from dropbox.exceptions import AuthError
+import datetime
 
 
 def dropbox_authorize():
@@ -39,12 +41,17 @@ def dropbox_authorize():
     return access_token
 
 
-def get_files(filename, date):
-    """ Get old version of file"""
+def main(argv):
+    # xString = raw_input("Enter the name of the file: ")
+    # date_entry = raw_input("Enter a date in YYYY-MM-DD format: ")
+    # year, month, day = map(int, date_entry.split('-'))
+    # date1 = datetime.date(year, month, day)
+
+    filename = '/TEST/test1.tex'
 
     access_token = dropbox_authorize()
 
-    # connect to dropbox
+    # Connect to dropbox
     dbx = dropbox.Dropbox(access_token)
 
     # Check that the access token is valid
@@ -54,17 +61,30 @@ def get_files(filename, date):
     except AuthError:
         sys.exit("ERROR: Invalid access token.")
 
-    first_ver = sorted(dbx.files_list_revisions(filename, limit=30).entries,
-                       key=lambda entry: entry.server_modified)[0]
+    list_all = sorted(dbx.files_list_revisions(filename, limit=30).entries,
+                      key=lambda entry: entry.server_modified)
+
+    for i in range(len(list_all)):
+        # print i + 1, '. ', list_all[i].server_modified
+        print('%d. %s' % (i + 1, list_all[i].server_modified))
+
+    xString = raw_input("Select the version to be compared: ")
+    first_ver = int(xString)
 
     # Download current version
     md1, res1 = dbx.files_download(filename)
 
     # Download old version
-    md2, res2 = dbx.files_download(filename, first_ver.rev)
+    md2, res2 = dbx.files_download(filename, list_all[first_ver - 1].rev)
 
     print "Current version:"
     print res1.content
     print "\n"
     print "Old version:"
     print res2.content
+
+    pass
+
+
+if __name__ == "__main__":
+    main(sys.argv)
