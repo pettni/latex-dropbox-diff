@@ -47,7 +47,7 @@ def main(argv):
     # year, month, day = map(int, date_entry.split('-'))
     # date1 = datetime.date(year, month, day)
 
-    filename = '/TEST/test1.tex'
+    filename = '/TEST/cow.tex'
 
     access_token = dropbox_authorize()
 
@@ -65,7 +65,6 @@ def main(argv):
                       key=lambda entry: entry.server_modified)
 
     for i in range(len(list_all)):
-        # print i + 1, '. ', list_all[i].server_modified
         print('%d. %s' % (i + 1, list_all[i].server_modified))
 
     xString = raw_input("Select the version to be compared: ")
@@ -77,7 +76,7 @@ def main(argv):
     # Download old version
     md2, res2 = dbx.files_download(filename, list_all[first_ver - 1].rev)
 
-    run_latexdiff(res1, res2)
+    run_latexdiff(res2.content, res1.content)
 
     pass
 
