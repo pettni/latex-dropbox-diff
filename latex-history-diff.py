@@ -1,44 +1,98 @@
 import os
 import sys
+import threading
+import webbrowser
+import time
+import logging
+from flask import Flask, request, redirect, session
 
 import dropbox
-from dropbox.exceptions import AuthError
+from dropbox.exceptions import *
 
 from latex import run_latexdiff
 
+APP_KEY = 'dnu3g85bhjd4np8'
+APP_SECRET = 'ut10a8pghd6pjik'
+PORT = 65011
+TOKEN = None
+TOKEN_FILENAME = '.dropbox_token'
 
-def dropbox_authorize():
-    """Obtain Dropbox access token"""
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
-    token_filename = '.dropbox_token'
+app = Flask(__name__)
+app.secret_key = 'COUCHPOTATO'
 
-    if os.path.isfile(token_filename):
+
+def get_dropbox_auth_flow(web_app_session):
+    redirect_url = "http://localhost:%s/dropbox-auth-finish" % PORT
+    return dropbox.DropboxOAuth2Flow(
+        APP_KEY, APP_SECRET, redirect_url, web_app_session,
+        "dropbox-auth-csrf-token")
+
+
+# URL handler for /notapproved
+@app.route("/notapproved")
+def notapproved():
+    return "Request not approved"
+
+
+# URL handler for /dropbox-auth-start
+@app.route("/dropbox-auth-start")
+def dropbox_auth_start():
+    authorize_url = get_dropbox_auth_flow(session).start()
+    return redirect(authorize_url)
+
+
+# URL handler for /dropbox-auth-finish
+@app.route("/dropbox-auth-finish")
+def dropbox_auth_finish():
+    global TOKEN
+    try:
+        code = request.args.get('code')
+        state = request.args.get('state')
+        access_token, user_id, url_state = \
+            get_dropbox_auth_flow(session). \
+            finish({'code': code, 'state': state})
+    except dropbox.oauth2.BadRequestException, e:
+        http_status(400)
+    except dropbox.oauth2.BadStateException, e:
+        # Start the auth flow again.
+        return redirect("/dropbox-auth-start")
+    except dropbox.oauth2.CsrfException, e:
+        http_status(403)
+    except dropbox.oauth2.NotApprovedException, e:
+        flash('Not approved?  Why not?')
+        return redirect("/notapproved")
+    except dropbox.oauth2.ProviderException, e:
+        logger.log("Auth error: %s" % (e,))
+        http_status(403)
+
+    TOKEN = access_token
+    request.environ.get('werkzeug.server.shutdown')()  # shut down server
+    return '<h1>Thank you</h1>'
+
+
+def dropbox_authorize_flask():
+    global TOKEN
+
+    if os.path.isfile(TOKEN_FILENAME):
         # if there is no access token saved
-        f = open(token_filename, 'r')
-        access_token = f.read()
+        f = open(TOKEN_FILENAME, 'r')
+        TOKEN = f.read()
         f.close()
     else:
-        # Get your app key and secret from the Dropbox developer website
-        app_key = 'dnu3g85bhjd4np8'
-        app_secret = 'ut10a8pghd6pjik'
+        def open_browser():
+            webbrowser.open("http://localhost:%s/dropbox-auth-start" % PORT)
 
-        flow = dropbox.client.DropboxOAuth2FlowNoRedirect(app_key, app_secret)
-        # Have the user sign in and authorize this token
-        authorize_url = flow.start()
-        print '1. Go to: ' + authorize_url
-        print '2. Click "Allow" (you might have to log in first)'
-        print '3. Copy the authorization code.'
-        code = raw_input("Enter the authorization code here: ").strip()
+        threading.Timer(0.5, open_browser).start()  # small delay to start
+        app.run(debug=False, port=PORT)
 
-        # This will fail if the user enters an invalid authorization code
-        access_token, user_id = flow.finish(code)
-
-        # save it
-        f = open(token_filename, 'w')
-        f.write(access_token)
+        while TOKEN is None:
+            time.sleep(1)
+        f = open(TOKEN_FILENAME, 'w')
+        f.write(TOKEN)
         f.close()
-
-    return access_token
 
 
 def main(argv):
@@ -49,10 +103,10 @@ def main(argv):
 
     filename = '/TEST/cow.tex'
 
-    access_token = dropbox_authorize()
+    dropbox_authorize_flask()
 
     # Connect to dropbox
-    dbx = dropbox.Dropbox(access_token)
+    dbx = dropbox.Dropbox(TOKEN)
 
     # Check that the access token is valid
     try:
@@ -64,21 +118,29 @@ def main(argv):
     list_all = sorted(dbx.files_list_revisions(filename, limit=30).entries,
                       key=lambda entry: entry.server_modified)
 
-    for i in range(len(list_all)):
-        print('%d. %s' % (i + 1, list_all[i].server_modified))
+    cached_users = {}
+    def get_username(user_id):
+        if user_id in cached_users:
+            return cached_users['id']
+        # Get from Dropbox
+        account = dbx.users_get_account(user_id)
+        cached_users['user_id'] = account.name.given_name
+        return cached_users['user_id']
 
-    xString = raw_input("Select the version to be compared: ")
-    first_ver = int(xString)
+    for i in range(len(list_all)):
+        print('%d. %s by %s' % (i + 1, list_all[i].server_modified,
+                                get_username(list_all[i].sharing_info.modified_by)))
+
+    comp_rev = int(raw_input("Select the version to be compared: "))
 
     # Download current version
     md1, res1 = dbx.files_download(filename)
 
-    # Download old version
-    md2, res2 = dbx.files_download(filename, list_all[first_ver - 1].rev)
+    # Download comparison version
+    md2, res2 = dbx.files_download(filename, list_all[comp_rev - 1].rev)
 
+    # Run diff on files
     run_latexdiff(res2.content, res1.content)
-
-    pass
 
 
 if __name__ == "__main__":
