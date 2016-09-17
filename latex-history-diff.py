@@ -5,6 +5,7 @@ import webbrowser
 import time
 import logging
 from flask import Flask, request, redirect, session
+import argparse
 
 import dropbox
 from dropbox.exceptions import *
@@ -22,7 +23,6 @@ log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 app.secret_key = 'COUCHPOTATO'
-
 
 def get_dropbox_auth_flow(web_app_session):
     redirect_url = "http://localhost:%s/dropbox-auth-finish" % PORT
@@ -101,7 +101,13 @@ def main(argv):
     # year, month, day = map(int, date_entry.split('-'))
     # date1 = datetime.date(year, month, day)
 
-    filename = '/TEST/cow.tex'
+    # Parse inputs
+    description = 'Highlight changes since last revision'
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('filename', action='store', help='Dropbox location of file (e.g. \'/folder/file.tex\')')
+
+    pr = parser.parse_args()
+    # filename = '/TEST/cow.tex'
 
     dropbox_authorize_flask()
 
@@ -111,14 +117,14 @@ def main(argv):
     # Check that the access token is valid
     try:
         dbx.users_get_current_account()
-        print "Connection successful"
     except AuthError:
         sys.exit("ERROR: Invalid access token.")
 
-    list_all = sorted(dbx.files_list_revisions(filename, limit=30).entries,
+    list_all = sorted(dbx.files_list_revisions(pr.filename, limit=100).entries,
                       key=lambda entry: entry.server_modified)
 
     cached_users = {}
+
     def get_username(user_id):
         if user_id in cached_users:
             return cached_users['id']
@@ -128,16 +134,16 @@ def main(argv):
         return cached_users['user_id']
 
     for i in range(len(list_all)):
-        print('%d. %s by %s' % (i + 1, list_all[i].server_modified,
-                                get_username(list_all[i].sharing_info.modified_by)))
-
-    comp_rev = int(raw_input("Select the version to be compared: "))
+        print('%d. %s by %s' %
+              (i + 1, list_all[i].server_modified,
+               get_username(list_all[i].sharing_info.modified_by)))
+    comp_rev = int(raw_input("Select the revision to compare against: "))
 
     # Download current version
-    md1, res1 = dbx.files_download(filename)
+    md1, res1 = dbx.files_download(pr.filename)
 
     # Download comparison version
-    md2, res2 = dbx.files_download(filename, list_all[comp_rev - 1].rev)
+    md2, res2 = dbx.files_download('rev:%s' % list_all[comp_rev - 1].rev)
 
     # Run diff on files
     run_latexdiff(res2.content, res1.content)
